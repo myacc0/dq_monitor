@@ -1,0 +1,102 @@
+Примеи справочной таблицы.
+
+create table catalog_table (
+    id            UUID           primary key,
+    
+    // ... поля таблицы 
+    
+    // поля активности
+    start_date    date           not null,
+    end_date      date,
+    
+    // поля аудита
+    version       number(10)     default 1 not null,
+    created_date  timestamp with time zone default systimestamp not null,
+    created_by    varchar2(100)  not null,
+    updated_date  timestamp with time zone,
+    updated_by    varchar2(100),
+    deleted_date  timestamp with time zone,
+    deleted_by    varchar2(100),
+
+    // констреинты
+    constraint ck_rcr_period  check (end_date is null or end_date >= start_date),
+    constraint ck_rcr_trunc   check (start_date = trunc(start_date)
+                                     and (end_date is null or end_date = trunc(end_date))),
+    constraint ck_rcr_deleted check ((deleted_date is null and deleted_by is null)
+                                  or (deleted_date is not null and deleted_by is not null))
+);
+
+create index ix_rcr_period on ref_currency_rate (start_date, end_date);
+
+
+
+Одна строка import_batch — это одна попытка импорта файла, в том числе неудачная. 
+В строке хранится ссылка на файл в MinIO.
+
+create table import_batch (
+    id                UUID        primary key,
+    table_name        varchar2(128)  not null,
+    file_name         varchar2(500)  not null,
+    file_size         number(12)     not null,
+    file_hash         varchar2(64)   not null,
+    storage_bucket    varchar2(100)  not null,
+    storage_key       varchar2(500)  not null,
+    template_version  varchar2(16),
+    status            varchar2(20)   not null  constraint ck_ib_status check (status in ('PROCESSING','APPLIED','REJECTED','FAILED')),
+    count_insert        number(10) default 0 not null,
+    count_update        number(10) default 0 not null,
+    count_unchanged     number(10) default 0 not null,
+    count_error         number(10) default 0 not null,
+    error_message     varchar2(4000),
+    created_date      timestamp with time zone default systimestamp not null,
+    created_by        varchar2(100)  not null,
+    finished_date     timestamp with time zone
+);
+
+create index ix_ib_table on import_batch (table_name, created_date);
+
+
+Одно изменение записи справочника даёт одну строку audit_log.Одна таблица журнала обслуживает все справочники. 
+История записи строится по (table_name, record_id), изменения одного импорта — по import_batch_id.
+
+create table audit_log (
+    id               number(19) generated always as identity primary key,
+    table_name       varchar2(128)  not null,
+    record_id        raw(16)        not null,
+    action           varchar2(10)   not null constraint ck_al_action check (action in ('INSERT','UPDATE','DELETE')),
+    old_data         clob constraint ck_al_old check (old_data is json),  -- 21c+: json
+    new_data         clob constraint ck_al_new check (new_data is json),
+    changed_date     timestamp with time zone default systimestamp not null,
+    changed_by       varchar2(100)  not null,
+    source           varchar2(10)   not null constraint ck_al_source check (source in ('UI','IMPORT')),
+    import_batch_id  raw(16) references import_batch(id)
+);
+
+create index ix_al_record on audit_log (table_name, record_id, changed_date);
+create index ix_al_batch  on audit_log (import_batch_id);
+
+
+2. Правила валидации записи
+Один и тот же валидатор проверяет данные из формы и строки Excel. 
+Запись не сохраняется, если нарушено хотя бы одно правило.
+
+- start_date - Объязательно поле
+- Если end_date заполнена, то end_date >= start_date
+- Если есть Обязательные бизнес-поля, нужен их список?
+- Формат start_date и end_date, DATE или DATETIME?
+- Удалённую запись изменить нельзя, удаление softDetele
+
+
+3.Импорт принимает файл целиком или не принимает его вообще: одна ошибка в любой строке отменяет все изменения.
+Файл разбирается в памяти, каждое изменение сохраняется в audit_log с source = 'IMPORT' и import_batch_id.
+
+Сопоставление строк при Excel import:
+----------------------------
+id пустой -> Создать запись (INSERT)
+id есть, значения всех полей совпадают с БД -> Без изменений: запись и аудит не трогаются
+id есть, значения полей отличаются -> Изменить запись (UPDATE)
+id не найден или запись удалена -> Ошибка
+id повторяется в файле -> Ошибка во всех строках с этим id
+version не совпадает с БД -> Ошибка: запись изменили в UI, после скачивания/import excel
+Запись есть в БД, но её нет в файле -> Игнорируется. Удалить запись можно только в UI
+Пустая строка -> Пропускается
