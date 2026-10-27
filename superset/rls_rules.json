@@ -1,0 +1,36 @@
+{
+  "_comment": "Правила Row Level Security для датасетов DQ. Создаются в Superset: Настройки → Безопасность строк, или через POST /api/v1/rowlevelsecurity/ (tables = id датасетов после импорта, roles = id ролей). Тип Regular: пользователь роли видит только строки, попадающие под clause.",
+  "datasets": ["agg_issue_daily", "dq_agg_on_date", "dq_issues_on_date", "dq_person_on_date", "dq_report_on_date"],
+  "rules": [
+    {
+      "name": "DQ: бизнес-владелец и стюарды — свои домены",
+      "filter_type": "Regular",
+      "roles": ["DQ_DomainOwner"],
+      "group_key": "dq_scope",
+      "clause": "domain_name in (select d.short_name from umida.dict_data_domain d left join umida.dict_data_domain p on p.id = d.parent_id join dq.v_user_domain u on u.domain_id in (d.id, p.id) where u.login = '{{ current_username() }}')"
+    },
+    {
+      "name": "DQ: ответственное подразделение — свои правила",
+      "filter_type": "Regular",
+      "roles": ["DQ_ResponsibleUnit"],
+      "group_key": "dq_scope",
+      "clause": "responsible_unit_name in (select ou.name from umida.org_unit ou join dds.dim_employee e on e.org_unit_id = ou.id where e.login = '{{ current_username() }}')"
+    },
+    {
+      "name": "DQ: отделение — своё отделение",
+      "filter_type": "Regular",
+      "roles": ["DQ_Branch"],
+      "group_key": "dq_scope",
+      "clause": "tobo_id in (select e.tobo_id from dds.dim_employee e where e.login = '{{ current_username() }}')"
+    },
+    {
+      "name": "DQ: сотрудник — только свои ошибки",
+      "filter_type": "Regular",
+      "roles": ["DQ_Employee"],
+      "group_key": "dq_scope",
+      "clause": "responsible_login = '{{ current_username() }}'",
+      "_note": "Для dq_person_on_date заменить на: login = '{{ current_username() }}'"
+    }
+  ],
+  "roles_without_rls": ["DQ_Admin", "DQ_Management"]
+}
