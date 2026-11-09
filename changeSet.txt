@@ -1,0 +1,12 @@
+<changeSet id="1" author="umida">
+	<update tableName="REPORT_REPORT">
+	    <column name="XML"
+		    valueComputed="replace(replace(XML,
+		        '&quot;umida_ExtReportGroup&quot;', '&quot;report_ReportGroup&quot;'),
+		        '&quot;umida_ReportGroup&quot;',    '&quot;report_ReportGroup&quot;')"/>
+	    <where>XML like '%"umida_ExtReportGroup"%' or XML like '%"umida_ReportGroup"%'</where>
+	</update>
+
+	<!-- Обратная замена неоднозначна: исходное имя восстановить нельзя -->
+	<rollback/>
+</changeSet>
