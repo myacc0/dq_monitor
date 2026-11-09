@@ -10,3 +10,16 @@
 	<!-- Обратная замена неоднозначна: исходное имя восстановить нельзя -->
 	<rollback/>
 </changeSet>
+
+
+<changeSet id="1" author="umida">
+	<sql>
+	    update REPORT_REPORT
+	    set XML = replace(replace(XML,
+		    '"umida_ExtReportGroup"', '"report_ReportGroup"'),
+		    '"umida_ReportGroup"',    '"report_ReportGroup"')
+	    where XML like '%"umida_ExtReportGroup"%'
+	       or XML like '%"umida_ReportGroup"%'
+	</sql>
+	<rollback/>
+</changeSet>
