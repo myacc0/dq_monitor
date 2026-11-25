@@ -1,0 +1,57 @@
+1. Значение колонок END_DATE во всех 16 таблицах сделать NULL по умолчанию, вместо 31.12.9999.
+
+2. Почистить таблицы, сбросить все данные.
+
+3. Добавить всем таблицам колонку:
+ID VARCHAR2(32) NOT NULL, установить как PK.
+
+4. Создать две таблицы для аудита по импортируемым файлам и для истории изменений по српавочникам, таблицы можете назвать по вашему усмотрению:
+
+CREATE TABLE umida_catalogs_import_batch (
+    id              VARCHAR2(32)  NOT NULL,
+    table_name      VARCHAR2(128 CHAR) NOT NULL,
+    file_name       VARCHAR2(500 CHAR) NOT NULL,
+    file_size       NUMBER(19)    NOT NULL,
+    file_hash       VARCHAR2(64)  NOT NULL,
+    storage_bucket  VARCHAR2(100 CHAR) NOT NULL,
+    storage_key     VARCHAR2(500 CHAR) NOT NULL,
+    count_insert    NUMBER(10)    NOT NULL,
+    count_update    NUMBER(10)    NOT NULL,
+    count_unchanged NUMBER(10)    NOT NULL,
+    created_by      VARCHAR2(255 CHAR),
+    created_date    TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    finished_date   TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    CONSTRAINT pk_umida_catalogs_import_batch PRIMARY KEY (id)
+);
+COMMENT ON TABLE umida_catalogs_import_batch IS 'Successful imports of Excel files into the dictionaries';
+COMMENT ON COLUMN umida_catalogs_import_batch.file_hash IS 'SHA-256 of the file, hex';
+COMMENT ON COLUMN umida_catalogs_import_batch.storage_bucket IS 'Name of the Jmix file storage';
+COMMENT ON COLUMN umida_catalogs_import_batch.storage_key IS 'Path of the file in the file storage';
+CREATE INDEX idx_umida_cat_import_created ON umida_catalogs_import_batch (created_date);
+
+
+CREATE TABLE umida_catalogs_audit_log (
+    id              VARCHAR2(32)  NOT NULL,
+    table_name      VARCHAR2(128 CHAR) NOT NULL,
+    record_id       VARCHAR2(32)  NOT NULL,
+    action          VARCHAR2(10)  NOT NULL,
+    old_data        CLOB,
+    new_data        CLOB,
+    source          VARCHAR2(20)  NOT NULL,
+    import_batch_id VARCHAR2(32),
+    created_by      VARCHAR2(255 CHAR),
+    created_date    TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    CONSTRAINT pk_umida_catalogs_audit_log PRIMARY KEY (id),
+    CONSTRAINT ck_umida_cat_audit_action CHECK (action IN ('INSERT', 'UPDATE', 'DELETE')),
+    CONSTRAINT ck_umida_cat_audit_source CHECK (source IN ('UI', 'IMPORT')),
+    CONSTRAINT ck_umida_cat_audit_old_json CHECK (old_data IS JSON),
+    CONSTRAINT ck_umida_cat_audit_new_json CHECK (new_data IS JSON),
+    CONSTRAINT fk_umida_cat_audit_batch FOREIGN KEY (import_batch_id)
+        REFERENCES umida_catalogs_import_batch (id)
+);
+COMMENT ON TABLE umida_catalogs_audit_log IS 'Changes of the dictionary records, one row per change';
+COMMENT ON COLUMN umida_catalogs_audit_log.source IS 'UI: edited in the application, IMPORT: an Excel import';
+CREATE INDEX idx_umida_cat_audit_record ON umida_catalogs_audit_log (table_name, record_id);
+CREATE INDEX idx_umida_cat_audit_batch ON umida_catalogs_audit_log (import_batch_id);
+CREATE INDEX idx_umida_cat_audit_created ON umida_catalogs_audit_log (created_date);
+GRANT SELECT, INSERT ON umida_catalogs_audit_log TO dwh_user;
